@@ -1,11 +1,12 @@
-# IBM_Doors_MCP
+# DOORS MCP 服务器
 
-这是一个 Model Context Protocol (MCP) 服务器，实现了与 IBM DOORS 9.7 需求管理系统的集成，使 AI 代理能够直接访问和查询 DOORS 中的测试用例数据。
+这是一个 Model Context Protocol (MCP) 服务器，实现了与 IBM DOORS 需求管理系统的集成，使 AI 代理能够直接访问和查询 DOORS 中的需求和测试用例数据。
 
 ## 项目概述
 
 本项目创建了一个 MCP 服务器，实现以下核心功能：
 - 提供 MCP 接口供外部调用
+- 实现 DOORS 需求数据的查询和结构化输出
 - 实现 DOORS 测试用例数据的查询和结构化输出
 - 支持通过 DXL 脚本与 DOORS 客户端交互
 - 将 DOORS 数据转换为标准化 CSV 格式并解析
@@ -13,6 +14,7 @@
 
 ## 功能特性
 
+- ✅ 支持查询 DOORS 需求数据
 - ✅ 支持查询 DOORS 测试用例数据
 - ✅ 支持通过 MCP 客户端传递认证信息
 - ✅ 支持通过 MCP 客户端传递 DOORS 客户端路径
@@ -26,6 +28,13 @@
 - **业务逻辑层**：实现DOORS数据访问逻辑和数据转换
 - **数据访问层**：通过DXL脚本与DOORS客户端交互
 - **资源管理层**：管理临时文件的创建和清理
+
+### 设计模式
+- 工厂模式：用于创建MCP服务器实例
+- 装饰器模式：用于注册MCP工具函数
+- 模板方法模式：用于定义DOORS数据访问的通用流程
+- 责任链模式：用于处理异常和错误情况
+- 上下文管理器：确保临时文件的正确清理
 
 ## 使用说明
 
@@ -77,6 +86,7 @@ if __name__ == "__main__":
         "DOORS_SERVERADDR": "your_serveraddr"
       },
       "autoApprove": [
+        "get_requirements",
         "get_testcases"
       ],
       "parameters": {
@@ -89,7 +99,7 @@ if __name__ == "__main__":
 
 5. **传递认证信息**：
    - 可选方式：
-     - 通过函数参数传递：`auth={"username": "user", "password": "pass", ""}`
+     - 通过函数参数传递：`auth={"username": "user", "password": "pass"}`
      - 通过环境变量设置：
        ```bash
        set DOORS_USERNAME=your_username
@@ -98,11 +108,20 @@ if __name__ == "__main__":
 
 ### MCP 工具函数
 
+#### 查询需求
+```python
+requirements = get_requirements(
+    module_path="/项目/需求模块", 
+    auth={"username": "user", "password": "pass"},
+    doors_path="C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"
+)
+```
+
 #### 查询测试用例
 ```python
 testcases = get_testcases(
     module_path="/项目/测试用例模块", 
-    auth={"username": "user", "password": "pass", "serveraddr":"12345@doors.xxxxx"},
+    auth={"username": "user", "password": "pass"},
     doors_path="C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"
 )
 ```
@@ -122,10 +141,17 @@ testcases = get_testcases(
 ### 示例用法
 
 ```python
+# 查询需求示例
+requirements = get_requirements(
+    "/项目/需求模块", 
+    {"username": "user", "password": "pass"},
+    "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"
+)
+
 # 查询测试用例示例
 testcases = get_testcases(
     "/项目/测试用例模块", 
-    {"username": "user", "password": "pass", "serveraddr":"12345@doors.xxxxx"},
+    {"username": "user", "password": "pass"},
     "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"
 )
 ```
@@ -182,4 +208,3 @@ testcases = get_testcases(
 ## 项目进展
 
 当前状态和下一步计划请参考 [memory-bank/progress.md](memory-bank/progress.md) 文件。
-
