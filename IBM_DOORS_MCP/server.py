@@ -1,13 +1,14 @@
 import subprocess
 import tempfile
 import csv
-import os
 import traceback
 from typing import List, Optional, Dict
 from typing_extensions import TypedDict
 from typing import Any
+from dotenv import load_dotenv
+load_dotenv()  # 加载环境变量文件 .env
 import logging
-
+import os
 from mcp.server.fastmcp import FastMCP
 
 # 配置日志记录
@@ -159,7 +160,7 @@ mcp = FastMCP(name="IBM_DOORS_MCP")
 
 # 新增：查询测试用例的工具函数
 @mcp.tool()
-def get_testcases(module_path: str, auth: Optional[Dict[str, str]] = None, doors_path: str = "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe") -> List[Testcase]:
+def get_testcases(module_path: str, doors_path: str = "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe") -> List[Testcase]:
     """
     通过 DOORS DXL 脚本调用 DOORS 客户端，读取指定模块的测试用例对象，返回结构化数据列表。
 
@@ -175,27 +176,15 @@ def get_testcases(module_path: str, auth: Optional[Dict[str, str]] = None, doors
         >>> get_testcases("module_path(/项目/测试用例模块)", {"username": "user", "password": "pass", "serveraddr":"12345@doors.xxxxx","doors_path": "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"})
     """
     # 获取认证信息（优先使用参数，其次使用环境变量）
-    if auth and isinstance(auth, dict):
-        # 从参数中获取用户名和密码
-        auth_username = auth.get('username')
-        auth_password = auth.get('password')
-        auth_serveraddr = auth.get('serveraddr')
-    else:
         # 从环境变量获取认证信息
-        auth_username = os.getenv('DOORS_USERNAME')
-        auth_password = os.getenv('DOORS_PASSWORD')
-        auth_serveraddr = os.getenv('DOORS_SERVERADDR')
+    auth_username = os.getenv('DOORS_USERNAME')
+    auth_password = os.getenv('DOORS_PASSWORD')
+    auth_serveraddr = os.getenv('DOORS_SERVERADDR')
     
     # 验证认证信息是否完整
     if not auth_username or not auth_password or not auth_serveraddr:
         # 如果没有提供认证信息，则抛出异常
         raise ValueError("需要提供DOORS用户名,密码和服务器地址")
-    
-    # 记录认证信息来源（用于调试）
-    if auth and isinstance(auth, dict):
-        logger.info("使用MCP客户端提供的认证信息")
-    else:
-        logger.info("使用环境变量中的认证信息")
     
     # 记录DOORS路径来源（用于调试）
     if 'doors_path' in locals() and doors_path != "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe":
@@ -263,7 +252,11 @@ def get_testcases(module_path: str, auth: Optional[Dict[str, str]] = None, doors
                     "doors_path": doors_path,
                     "temp_dir": temp_dir
                 }
-                raise RuntimeError(f"DOORS DXL执行失败: 退出代码 {result.returncode}, 命令: {cmd}") from e
+                # 创建详细的错误信息
+                error_msg = f"DOORS DXL执行失败: 退出代码 {result.returncode}, 命令: {cmd}"
+                if stderr:
+                    error_msg += f", 错误详情: {stderr}"
+                raise RuntimeError(error_msg)
         except Exception as e:
             # 记录异常信息
             logger.error(f"DXL执行异常: {str(e)}")
