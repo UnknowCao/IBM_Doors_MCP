@@ -166,14 +166,13 @@ def get_testcases(module_path: str, doors_path: str = "C:\\Program Files\\IBM\\R
 
     参数:
         module_path (str): DOORS 测试用例模块的路径（如 "/项目/测试用例模块"）
-        auth (Dict[str, str], optional): 认证信息字典，包含用户名和密码，如 {"username": "user", "password": "pass", "serveraddr": "1234@doors.xxxxxx"}
         doors_path (str): DOORS 客户端的执行路径，默认为 "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"
     
     返回:
         List[Testcase]: 测试用例对象的结构化列表，每个元素为一个测试用例的详细信息。
         
     示例:
-        >>> get_testcases("module_path(/项目/测试用例模块)", {"username": "user", "password": "pass", "serveraddr":"12345@doors.xxxxx","doors_path": "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"})
+        >>> get_testcases("module_path(/项目/测试用例模块)", "doors_path": "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"})
     """
     # 获取认证信息（优先使用参数，其次使用环境变量）
         # 从环境变量获取认证信息
@@ -321,7 +320,7 @@ def get_testcases(module_path: str, doors_path: str = "C:\\Program Files\\IBM\\R
 
 @mcp.resource("config://version")
 def get_version():
-    return "1.0.0"
+    return "1.0.1"
 
 # MCP 服务器入口，支持命令行/Inspector/Claude Desktop 启动
 if __name__ == "__main__":

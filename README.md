@@ -1,4 +1,4 @@
-# DOORS MCP 服务器
+# DOORS MCP V1.0.1服务器
 
 这是一个 Model Context Protocol (MCP) 服务器，实现了与 IBM DOORS 需求管理系统的集成，使 AI 代理能够直接访问和查询 DOORS 中的需求和测试用例数据。
 
