@@ -1,10 +1,8 @@
 import subprocess
 import tempfile
-import csv
 import traceback
 from typing import List, Optional, Dict
 from typing_extensions import TypedDict
-from typing import Any
 from dotenv import load_dotenv
 load_dotenv()  # 加载环境变量文件 .env
 import logging
@@ -160,26 +158,35 @@ mcp = FastMCP(name="IBM_DOORS_MCP")
 
 # 新增：查询测试用例的工具函数
 @mcp.tool()
-def get_testcases(module_path: str, doors_path: str = "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe") -> List[Testcase]:
+def get_testcases(module_path: str) -> List[Testcase]:
     """
-    通过 DOORS DXL 脚本调用 DOORS 客户端，读取指定模块的测试用例对象，返回结构化数据列表。
+通过CMD调用Doors程序和DXL脚本，读取指定模块的测试用例对象，返回结构化数据列表。
 
-    参数:
-        module_path (str): DOORS 测试用例模块的路径（如 "/项目/测试用例模块"）
-        doors_path (str): DOORS 客户端的执行路径，默认为 "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"
-    
-    返回:
-        List[Testcase]: 测试用例对象的结构化列表，每个元素为一个测试用例的详细信息。
-        
-    示例:
-        >>> get_testcases("module_path(/项目/测试用例模块)", "doors_path": "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"})
-    """
+参数:
+    module_path (str): DOORS 测试用例模块的路径（如 "/项目/测试用例模块"）
+    环境变量需包含 DOORS_USERNAME、DOORS_PASSWORD、DOORS_SERVERADDR（认证信息），可选 DOORS_PATH（DOORS 客户端路径，默认 "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"）
+
+返回:
+    List[Testcase]: 测试用例对象的结构化列表，每个元素包含：
+        - ID: 测试用例唯一标识符
+        - Object_Type: 固定为 "Testcase"
+        - Object_Status: 固定为 "Released"
+        - TcURL: 测试用例的URL链接
+        - Test_Description: 测试用例内容
+        - Test_Steps: 测试步骤
+        - Expected_Results: 预期结果
+
+示例:
+    >>> get_testcases("/项目/测试用例模块")
+"""
+
     # 获取认证信息（优先使用参数，其次使用环境变量）
         # 从环境变量获取认证信息
     auth_username = os.getenv('DOORS_USERNAME')
     auth_password = os.getenv('DOORS_PASSWORD')
     auth_serveraddr = os.getenv('DOORS_SERVERADDR')
-    
+    doors_path = os.getenv('DOORS_PATH', "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe")
+
     # 验证认证信息是否完整
     if not auth_username or not auth_password or not auth_serveraddr:
         # 如果没有提供认证信息，则抛出异常
@@ -190,54 +197,64 @@ def get_testcases(module_path: str, doors_path: str = "C:\\Program Files\\IBM\\R
         logger.info(f"使用MCP客户端提供的DOORS路径: {doors_path}")
     else:
         logger.info(f"使用默认的DOORS路径: {doors_path}")
-    
-    # 构造 DXL 脚本，读取模块并输出测试用例属性为 CSV 格式
-    dxl_script = f'''
-    Module m = null
-    object 0 = null
-    int i =0
 
-    m = read("{module_path}", false)
-    if (null m) {{
-        print "ERROR: Module" module_path "not found\\n"
-        halt
+    if 'module_path' in locals():
+        logger.info(f"使用MCP客户端提供的模块路径: {module_path}")
+    else:
+        raise ValueError("需要提供模块路径，如/XXXXX/System/SysT/SysTS")
+
+    # 构造 DXL 脚本，读取模块并输出测试用例属性为 Markdown 格式
+    dxl_script = f'''Module m;m = null
+Object o; o = null
+int i = 0
+
+m = read("{module_path}", false)
+if (null m) {{
+	print "ERROR: {module_path} not found\\n"
+    halt
+}}
+
+Stream output = write("output.md")
+for o in m do {{
+    string ObjType = o."Object_Type"
+    string ObjStatus = o."Object_Status"
+    if(!null ObjType && ObjType == "Testcase" && !null ObjStatus && ObjStatus == "Released") 
+    {{
+        output << "- TcID: " identifier(o) "\n"
+        output << "- URL: " getURL(o) "\n"
+        output << "- Test_Description: " o."Test_Description" "\n"
+        output << "- Test_Steps: " o."Test_Steps" "\n"
+        output << "- Expected_Results: " o."Expected_Results" "\n\n"
     }}
-    for o in m do {{
-        string ObjType = o."Object_Type"
-        string ObjStatus = o."Object_Status"
-        if(!null ObjType && ObjType == "Testcase" && !null ObjStatus && ObjStatus == "Released") 
-        {{
-            print identifier(o) ","
-            print getURL(o) ","
-            print o."Test_Description" ","
-            print o."Test_Steps" ","
-            print o."Expected_Results" "\\n"
-        }}
-    }}
-    close(m)
+}}
+close(output)
+close(m)
     '''
     # 创建临时目录管理相关文件
     with tempfile.TemporaryDirectory() as temp_dir:
-        # 在临时目录中创建 DXL 脚本文件
-        dxl_path = os.path.join(temp_dir, "script.dxl")
+        dxl_path = os.path.join(temp_dir, "script.dxl")        # 在临时目录中创建 DXL 脚本文件
         with open(dxl_path, "w", encoding="utf-8") as dxl_file:
             dxl_file.write(dxl_script)
+        if not os.path.exists(dxl_path):
+            logging.error(f"script.dxl未生成，路径: {dxl_path}")
+            raise FileNotFoundError(f"script.dxl未生成，路径: {dxl_path}")
+        if os.path.getsize(dxl_path) == 0:
+            logging.error(f"script.dxl文件为空，路径: {dxl_path}")
+            raise RuntimeError(f"script.dxl文件为空，路径: {dxl_path}")
         
-        # 创建临时输出文件
-        out_path = os.path.join(temp_dir, "output.csv")
-
+        # 设置output.md文件路径
+        out_path = os.path.join(temp_dir, "output.md")
+        
         try:
             # 构建并执行 DOORS 命令
             # 使用双引号包裹路径，处理路径中的空格
-            cmd = f'"{doors_path}" -d {auth_serveraddr} -u {auth_username} -P {auth_password} -batch -dxl "{dxl_path}" > "{out_path}"'
+            cmd = f'"{doors_path}" -d {auth_serveraddr} -u {auth_username} -P {auth_password} -dxl "#include <{dxl_path}>"'
             logger.info(f"正在执行DOORS命令: {cmd}")
-            
             # 执行命令并捕获输出
             # shell=True 允许使用字符串命令，适用于Windows环境
             # timeout=60 防止命令挂起
             # capture_output=True 捕获标准错误输出用于调试
-            result = subprocess.run(cmd, shell=True, timeout=60, capture_output=True)
-            
+            result = subprocess.run(cmd, shell=True, timeout=100, capture_output=True)
             # 检查命令执行状态
             if result.returncode != 0:
                 # 记录详细的错误信息
@@ -269,59 +286,67 @@ def get_testcases(module_path: str, doors_path: str = "C:\\Program Files\\IBM\\R
             # 抛出带详细上下文信息的异常
             raise RuntimeError(f"DXL执行异常: {str(e)}, 命令: {cmd}, 临时目录: {temp_dir}") from e
         
-        # 解析 CSV 文件，转换为结构化 Testcase 列表
+        # 检查output.md文件是否存在且不为空
+        if not os.path.exists(out_path):
+            logging.error(f"output.md未生成，路径: {out_path}")
+            raise FileNotFoundError(f"output.md未生成，路径: {out_path}")
+        if os.path.getsize(out_path) == 0:
+            logging.error(f"output.md文件内容为空，路径: {out_path}")
+            raise RuntimeError(f"output.md文件内容为空，路径: {out_path}")
+        
+        # 解析 Markdown 文件，转换为结构化 Testcase 列表
         testcases: List[Testcase] = []
         try:
             with open(out_path, "r", encoding="utf-8") as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    # 跳过错误行或格式不完整行
-                    if len(row) < 5 or row[0].startswith("ERROR"):
-                        continue
+                content = f.read()
+            # 按测试用例分组解析Markdown内容
+            test_case_blocks = content.strip().split("\n\n")
+            
+            for block in test_case_blocks:
+                if not block.strip():
+                    continue
+                    
+                lines = block.strip().split("\n")
+                testcase_data = {}
+                
+                for line in lines:
+                    if line.startswith("- TcID: "):
+                        testcase_data["ID"] = line.replace("- TcID: ", "").strip()
+                    elif line.startswith("- URL: "):
+                        testcase_data["TcURL"] = line.replace("- URL: ", "").strip()
+                    elif line.startswith("- Test_Description: "):
+                        testcase_data["Test_Description"] = line.replace("- Test_Description: ", "").strip()
+                    elif line.startswith("- Test_Steps: "):
+                        testcase_data["Test_Steps"] = line.replace("- Test_Steps: ", "").strip()
+                    elif line.startswith("- Expected_Results: "):
+                        testcase_data["Expected_Results"] = line.replace("- Expected_Results: ", "").strip()
+                
+                # 确保所有必需字段都存在
+                if all(key in testcase_data for key in ["ID", "TcURL", "Test_Description", "Test_Steps", "Expected_Results"]):
                     testcases.append({
-                        "ID": row[0],
-                        "TcURL": row[1],
-                        "Test_Description": row[2],
-                        "Test_Steps": row[3],
-                        "Expected_Results": row[4]
+                        "ID": testcase_data["ID"],
+                        "Object_Type": "Testcase",  # 添加缺失的字段
+                        "Object_Status": "Released",  # 添加缺失的字段
+                        "TcURL": testcase_data["TcURL"],
+                        "Test_Description": testcase_data["Test_Description"],
+                        "Test_Steps": testcase_data["Test_Steps"],
+                        "Expected_Results": testcase_data["Expected_Results"]
                     })
         except Exception as e:
-            logger.error(f"CSV解析异常: {str(e)}")
-            raise RuntimeError(f"CSV解析异常: {str(e)}") from e
-
-    testcases: List[Testcase] = []
-    try:
-        # 解析 CSV 文件，转换为结构化 Testcase 列表
-        with open(out_path, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                # 跳过错误行或格式不完整行
-                if len(row) < 5 or row[0].startswith("ERROR"):
-                    continue
-                testcases.append({
-                    "ID": row[0],
-                    "TcURL": row[1],
-                    "Test_Description": row[2],
-                    "Test_Steps": row[3],
-                    "Expected_Results": row[4]
-                })
-    except Exception as e:
-        logger.error(f"CSV解析异常: {str(e)}")
-        error_context = {
-            "module_path": module_path,
-            "file_path": out_path,
-            "error": str(e),
-            "file_content": open(out_path, "r", encoding="utf-8").read() if os.path.exists(out_path) else None,
-            "traceback": traceback.format_exc()
-        }
-        raise RuntimeError(f"CSV解析异常: {str(e)}, 文件路径: {out_path}, 文件内容: {error_context['file_content']}, 堆栈跟踪: {error_context['traceback']}") from e
-
+            logger.error(f"MD解析异常: {str(e)}")
+            error_context = {
+                "module_path": module_path,
+                "file_path": out_path,
+                "error": str(e),
+                "file_content": open(out_path, "r", encoding="utf-8").read() if os.path.exists(out_path) else None,
+                "traceback": traceback.format_exc()
+            }
+            raise RuntimeError(f"MD解析异常: {str(e)}, 文件路径: {out_path}, 文件内容: {error_context['file_content']}, 堆栈跟踪: {error_context['traceback']}") from e
     return testcases
 
 @mcp.resource("config://version")
 def get_version():
     return "1.0.1"
-
 # MCP 服务器入口，支持命令行/Inspector/Claude Desktop 启动
 if __name__ == "__main__":
     mcp.run(transport='stdio')
