@@ -1,15 +1,27 @@
-import subprocess
-import tempfile
-import traceback
-from typing import List, Optional, Dict
-from typing_extensions import TypedDict
-from dotenv import load_dotenv
-load_dotenv()  # 加载环境变量文件 .env
-import logging
-import os
-from mcp.server.fastmcp import FastMCP
+# -*- coding: utf-8 -*-
+# DOORS MCP server main file
+# Implements DOORS testcase data query, DXL script interaction, structured output, exception handling, etc.
 
-# 配置日志记录
+import subprocess           # For executing DOORS client commands
+import tempfile             # For temporary file and directory management
+import traceback            # For exception stack trace
+from typing import List, Optional, Dict   # Type annotations
+from typing_extensions import TypedDict   # Structured data types
+from dotenv import load_dotenv            # Load environment variables
+load_dotenv()  # Load DOORS authentication info from .env file
+import os
+
+import logging                # Logging
+logging.basicConfig(
+    filename='mylog.txt',
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s'
+)
+
+from mcp.server.fastmcp import FastMCP    # MCP协议服务器框架
+import time
+
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -23,20 +35,21 @@ logger = logging.getLogger(__name__)
 #     modified_on: str     # 最后修改时间
 #     modified_by: str     # 最后修改人
 
-# 定义测试用例对象的数据结构
+# Define the data structure for testcase objects
 class Testcase(TypedDict):
-    ID: str              # 测试用例的唯一标识符
-    Object_Type: str     # 测试用例标题
-    Test_Description: str  # 测试用例内容
-    Object_Status: str   # 测试用例状态
-    TcURL: str           # 测试用例的URL链接
-    Test_Steps: str      # 测试步骤
-    Expected_Results: str  # 预期结果
+    ID: str              # Unique identifier for the testcase
+    Object_Type: str     # Testcase title (fixed as "Testcase")
+    Test_Description: str  # Testcase description
+    Object_Status: str   # Testcase status (fixed as "Released")
+    TcURL: str           # Testcase URL link
+    Test_Steps: str      # Test steps
+    Expected_Results: str  # Expected results
 
-# 创建 MCP 服务器实例，名称会显示在 MCP Inspector/Claude Desktop 工具列表中
+# Create MCP server instance, register to MCP Inspector/Claude Desktop tool list
+# FastMCP framework implements MCP protocol and tool registration
 mcp = FastMCP(name="IBM_DOORS_MCP")
 
-# 注册工具函数为 MCP 工具，供外部调用
+# Register tool function as MCP tool for external calls
 # @mcp.tool()
 # def get_requirements(module_path: str, auth: Optional[Dict[str, str]] = None, doors_path: str = "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe") -> List[Requirement]:
 #     """
@@ -156,197 +169,289 @@ mcp = FastMCP(name="IBM_DOORS_MCP")
 
 #     return requirements
 
-# 新增：查询测试用例的工具函数
+
+# Added: Tool function for querying testcases
 @mcp.tool()
-def get_testcases(module_path: str) -> List[Testcase]:
+def get_testcases(module_path: str, output_path: str) -> List[Testcase]:
     """
-通过CMD调用Doors程序和DXL脚本，读取指定模块的测试用例对象，返回结构化数据列表。
+    Query testcase objects from the specified DOORS module via CMD and DXL script, return a structured data list, and support custom output file path.
 
-参数:
-    module_path (str): DOORS 测试用例模块的路径（如 "/项目/测试用例模块"）
-    环境变量需包含 DOORS_USERNAME、DOORS_PASSWORD、DOORS_SERVERADDR（认证信息），可选 DOORS_PATH（DOORS 客户端路径，默认 "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe"）
+    Args:
+        module_path (str): Full path to the DOORS testcase module, e.g. "/Project/TestcaseModule"
+        output_path (str): Directory path to save the output file, e.g. "C:\\output_path", automatically generates output.md
 
-返回:
-    List[Testcase]: 测试用例对象的结构化列表，每个元素包含：
-        - ID: 测试用例唯一标识符
-        - Object_Type: 固定为 "Testcase"
-        - Object_Status: 固定为 "Released"
-        - TcURL: 测试用例的URL链接
-        - Test_Description: 测试用例内容
-        - Test_Steps: 测试步骤
-        - Expected_Results: 预期结果
+    Environment variables required:
+        DOORS_USERNAME, DOORS_PASSWORD, DOORS_SERVERADDR (authentication info), optional DOORS_PATH (DOORS client path, default "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe")
 
-示例:
-    >>> get_testcases("/项目/测试用例模块")
-"""
+    Returns:
+        List[Testcase]: Structured list of testcase objects, each element contains:
+            - ID: Unique identifier for the testcase
+            - Object_Type: Fixed as "Testcase"
+            - Object_Status: Fixed as "Released"
+            - TcURL: Testcase URL link
+            - Test_Description: Testcase description
+            - Test_Steps: Test steps
+            - Expected_Results: Expected results
 
-    # 获取认证信息（优先使用参数，其次使用环境变量）
-        # 从环境变量获取认证信息
+    Example:
+        >>> get_testcases("/Project/TestcaseModule", "C:\\output_path")
+    """
+
+    # Get DOORS authentication info (prefer parameters, then environment variables)
+    # Authentication info is used to log in to DOORS client, must include username, password, server address
     auth_username = os.getenv('DOORS_USERNAME')
     auth_password = os.getenv('DOORS_PASSWORD')
     auth_serveraddr = os.getenv('DOORS_SERVERADDR')
-    doors_path = os.getenv('DOORS_PATH', "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe")
+    doors_path = os.getenv('DOORS_PATH')
+    # Join output file path and convert to forward slash for DXL compatibility
+    out_path = os.path.join(output_path, "output.md")
+    out_path = out_path.replace("\\", "/")
 
-    # 验证认证信息是否完整
+    # Validate output_path is a legal, existing directory
+    if not os.path.isdir(output_path):
+        logger.error(f"Output directory does not exist or is invalid: {output_path}")
+        raise FileNotFoundError(f"Output directory does not exist or is invalid: {output_path}")
+    elif 'out_path' in locals() and out_path != "\\IBM_DOORS_MCP-MAIN\\output.md":
+        logger.info(f"Using MCP client provided output path: {out_path}")
+    else:
+        logger.info(f"Using default output path: {out_path}")
+
+    # Validate authentication info completeness, raise exception if missing
     if not auth_username or not auth_password or not auth_serveraddr:
-        # 如果没有提供认证信息，则抛出异常
-        raise ValueError("需要提供DOORS用户名,密码和服务器地址")
+        raise ValueError("DOORS username, password, and server address are required")
     
-    # 记录DOORS路径来源（用于调试）
+    # Log DOORS client path source (for debugging)
     if 'doors_path' in locals() and doors_path != "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe":
-        logger.info(f"使用MCP客户端提供的DOORS路径: {doors_path}")
+        logger.info(f"Using MCP client provided DOORS path: {doors_path}")
     else:
-        logger.info(f"使用默认的DOORS路径: {doors_path}")
+        logger.info(f"Using default DOORS path: {doors_path}")
 
+    # Validate module_path parameter
     if 'module_path' in locals():
-        logger.info(f"使用MCP客户端提供的模块路径: {module_path}")
+        logger.info(f"Using MCP client provided module path: {module_path}")
     else:
-        raise ValueError("需要提供模块路径，如/XXXXX/System/SysT/SysTS")
+        raise ValueError("Module path is required, e.g. /XXXXX/System/SysT/SysTS")
 
-    # 构造 DXL 脚本，读取模块并输出测试用例属性为 Markdown 格式
+    # Construct DXL script to read module and output testcase attributes in Markdown format
+    # DXL script traverses module objects, filters Released Testcase objects, and outputs as standard Markdown
     dxl_script = f'''Module m;m = null
-Object o; o = null
+Object o;o = null
 int i = 0
 
 m = read("{module_path}", false)
 if (null m) {{
-	print "ERROR: {module_path} not found\\n"
+    print "ERROR: {module_path} not found\\n"
     halt
 }}
 
-Stream output = write("output.md")
+Stream output = write("{out_path}")
 for o in m do {{
     string ObjType = o."Object_Type"
     string ObjStatus = o."Object_Status"
     if(!null ObjType && ObjType == "Testcase" && !null ObjStatus && ObjStatus == "Released") 
     {{
-        output << "- TcID: " identifier(o) "\n"
-        output << "- URL: " getURL(o) "\n"
-        output << "- Test_Description: " o."Test_Description" "\n"
-        output << "- Test_Steps: " o."Test_Steps" "\n"
-        output << "- Expected_Results: " o."Expected_Results" "\n\n"
+        output <<  "++++++++++++++++++++++++++++++++++++++++++++++++++++++\n"     
+        output << "## Testcase: " identifier(o) "\n"
+        output << "- **URL**: " getURL(o) "\n"
+        output << "- **Status**: Released\n"
+        output << "- **Description**: " o."Test_Description" "\n"
+        output << "- **Steps**:\n" o."Test_Steps" "\n"
+        output << "- **Expected Results**:\n" o."Expected_Results" "\n"
     }}
 }}
-close(output)
+output << "__DXL_SUCCESS__"
+close(output) 
 close(m)
-    '''
-    # 创建临时目录管理相关文件
+'''
+
+    # Create temporary directory to manage related files
     with tempfile.TemporaryDirectory() as temp_dir:
-        dxl_path = os.path.join(temp_dir, "script.dxl")        # 在临时目录中创建 DXL 脚本文件
+        dxl_path = os.path.join(temp_dir, "script.dxl")        # Create DXL script file in temp directory
         with open(dxl_path, "w", encoding="utf-8") as dxl_file:
             dxl_file.write(dxl_script)
+        if os.path.exists(dxl_path):
+            logging.info(f"script.dxl  generated, path: {dxl_path}") 
         if not os.path.exists(dxl_path):
-            logging.error(f"script.dxl未生成，路径: {dxl_path}")
-            raise FileNotFoundError(f"script.dxl未生成，路径: {dxl_path}")
+            logging.error(f"script.dxl not generated, path: {dxl_path}")
+            raise FileNotFoundError(f"script.dxl not generated, path: {dxl_path}")
         if os.path.getsize(dxl_path) == 0:
-            logging.error(f"script.dxl文件为空，路径: {dxl_path}")
-            raise RuntimeError(f"script.dxl文件为空，路径: {dxl_path}")
-        
-        # 设置output.md文件路径
-        out_path = os.path.join(temp_dir, "output.md")
-        
+            logging.error(f"script.dxl file is empty, path: {dxl_path}")
+            raise RuntimeError(f"script.dxl file is empty, path: {dxl_path}")
         try:
-            # 构建并执行 DOORS 命令
-            # 使用双引号包裹路径，处理路径中的空格
-            cmd = f'"{doors_path}" -d {auth_serveraddr} -u {auth_username} -P {auth_password} -dxl "#include <{dxl_path}>"'
-            logger.info(f"正在执行DOORS命令: {cmd}")
-            # 执行命令并捕获输出
-            # shell=True 允许使用字符串命令，适用于Windows环境
-            # timeout=60 防止命令挂起
-            # capture_output=True 捕获标准错误输出用于调试
-            result = subprocess.run(cmd, shell=True, timeout=100, capture_output=True)
-            # 检查命令执行状态
-            if result.returncode != 0:
-                # 记录详细的错误信息
-                stderr = result.stderr.decode("utf-8", errors="ignore") if result.stderr else None
-                logger.error(f"DOORS DXL执行失败，错误信息: {result.stderr}")
-                error_context = {
-                    "command": cmd,
-                    "exit_code": result.returncode,
-                    "stderr": stderr,
-                    "module_path": module_path,
-                    "doors_path": doors_path,
-                    "temp_dir": temp_dir
-                }
-                # 创建详细的错误信息
-                error_msg = f"DOORS DXL执行失败: 退出代码 {result.returncode}, 命令: {cmd}"
-                if stderr:
-                    error_msg += f", 错误详情: {stderr}"
-                raise RuntimeError(error_msg)
+            # Build and execute DOORS command
+            # Use double quotes for paths to handle spaces
+            cmd = f'"{doors_path}" -d {auth_serveraddr} -u {auth_username} -P {auth_password} -dxl "#include <{dxl_path}>"' 
+            # cmd = f'"C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe" -d 36677@doors.prehgad.local -u CaoX -P vT38.6F3GV7ytFHx111111111111111 -dxl "#include <C:\\Users\\cao_x2\\AppData\\Local\\Temp\\tmpuwhcg589\\script.dxl>"'
+            # Check and remove old output.md to prevent false positive
+            if os.path.isfile(out_path):
+                try:
+                    os.remove(out_path)
+                    logger.info(f"Old output.md deleted: {out_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete old output.md: {e}")
+            marker = "__DXL_SUCCESS__"  # Marker string for DXL script execution success
+            max_wait = int(os.getenv("DOORS_MAX_WAIT", "1200"))  # Maximum wait time in seconds, configurable via env
+            poll_interval = 1  # File polling interval (seconds)
+            # Asynchronously start DOORS client process to execute DXL script
+            #args = [doors_path, '-d ', auth_serveraddr, '-u ', auth_username, '-P ', auth_password, '-dxl ', f'#include <{dxl_path}>']
+            # os.system('C:/Program Files/IBM/Rational/DOORS/9.7/bin/doors.exe')
+            # cmd1 = subprocess.Popen(
+            #     [r'{doors_path}'],
+                # env=env,
+                # cwd=r'C:\Program Files\IBM\Rational\DOORS\bin',
+                # stdout=subprocess.PIPE,
+                # stdin=subprocess.PIPE,
+                # stderr=subprocess.PIPE, 
+                # creationflags=subprocess.CREATE_NEW_CONSOLE,
+                # close_fds=True
+            # )
+            # cmd1.stdin.write(cmd.encode('utf-8') + b'\n')
+            # cmd1.stdin.flush()
+            # cmd1.wait()
+            # cmd1.stdin.close()
+            # #cmd1.stdout.close()
+            # cmd1.stderr.close()
+            
+            proc = subprocess.Popen(
+                 cmd,
+                 cwd=r"C:\\Program Files\\IBM\\Rational\\DOORS\\9.7",
+                 shell=True
+            )
+            doors_pid = proc.pid
+
+            # process = subprocess.Popen([
+            #     r'C:\Program Files\IBM\Rational\DOORS\9.7\bin\doors.exe',
+            #     '-nosplash',  # 禁用启动画面
+            #     '-console',   # 启用控制台输出
+            #     '-debug'      # 启用调试模式
+            # ], env=env, cwd=r'C:\Program Files\IBM\Rational\DOORS\9.7\bin')
+            # process = subprocess.Popen([
+            #     'cmd', '/c', 'doors.exe'
+            # ], cwd=r'C:\Program Files\IBM\Rational\DOORS\9.7\bin'
+            # )
+
+            logger.info(f"Executing DOORS command: {cmd}")
+            start = time.time()
+            found = False
+            # Loop to check if output.md is generated and contains marker string
+            while time.time() - start < max_wait:
+                # Check if file is generated
+                if os.path.isfile(out_path):
+                    with open(out_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    # Check if file contains DXL success marker
+                    if marker in content:
+                        found = True
+                        break  # Marker detected, exit loop
+                time.sleep(poll_interval)  # Not detected, wait and retry
+            # Timeout: marker not detected, consider execution failed
+            if not found:
+                error_msg = f"DXL did not output marker string within {max_wait} seconds, command: {cmd}"
+                logger.error(error_msg)
+                raise TimeoutError(error_msg)
+            else: # Marker detected, wait for DOORS process to exit normally
+                logger.info(f"DOORS DXL process ended, output.md marker detected")
+            subprocess.run(f"taskkill /F /PID {doors_pid}", shell=True)
         except Exception as e:
-            # 记录异常信息
-            logger.error(f"DXL执行异常: {str(e)}")
+            # DXL execution exception handling, log context and raise detailed exception
+            logger.error(f"DXL execution exception: {str(e)}")
             error_context = {
                 "command": cmd,
                 "module_path": module_path,
                 "doors_path": doors_path,
+                "out_path": out_path,
                 "temp_dir": temp_dir,
                 "error": str(e)
             }
-            # 抛出带详细上下文信息的异常
-            raise RuntimeError(f"DXL执行异常: {str(e)}, 命令: {cmd}, 临时目录: {temp_dir}") from e
-        
-        # 检查output.md文件是否存在且不为空
-        if not os.path.exists(out_path):
-            logging.error(f"output.md未生成，路径: {out_path}")
-            raise FileNotFoundError(f"output.md未生成，路径: {out_path}")
-        if os.path.getsize(out_path) == 0:
-            logging.error(f"output.md文件内容为空，路径: {out_path}")
-            raise RuntimeError(f"output.md文件内容为空，路径: {out_path}")
-        
-        # 解析 Markdown 文件，转换为结构化 Testcase 列表
-        testcases: List[Testcase] = []
-        try:
-            with open(out_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            # 按测试用例分组解析Markdown内容
-            test_case_blocks = content.strip().split("\n\n")
-            
-            for block in test_case_blocks:
-                if not block.strip():
-                    continue
-                    
-                lines = block.strip().split("\n")
-                testcase_data = {}
-                
-                for line in lines:
-                    if line.startswith("- TcID: "):
-                        testcase_data["ID"] = line.replace("- TcID: ", "").strip()
-                    elif line.startswith("- URL: "):
-                        testcase_data["TcURL"] = line.replace("- URL: ", "").strip()
-                    elif line.startswith("- Test_Description: "):
-                        testcase_data["Test_Description"] = line.replace("- Test_Description: ", "").strip()
-                    elif line.startswith("- Test_Steps: "):
-                        testcase_data["Test_Steps"] = line.replace("- Test_Steps: ", "").strip()
-                    elif line.startswith("- Expected_Results: "):
-                        testcase_data["Expected_Results"] = line.replace("- Expected_Results: ", "").strip()
-                
-                # 确保所有必需字段都存在
-                if all(key in testcase_data for key in ["ID", "TcURL", "Test_Description", "Test_Steps", "Expected_Results"]):
-                    testcases.append({
-                        "ID": testcase_data["ID"],
-                        "Object_Type": "Testcase",  # 添加缺失的字段
-                        "Object_Status": "Released",  # 添加缺失的字段
-                        "TcURL": testcase_data["TcURL"],
-                        "Test_Description": testcase_data["Test_Description"],
-                        "Test_Steps": testcase_data["Test_Steps"],
-                        "Expected_Results": testcase_data["Expected_Results"]
-                    })
-        except Exception as e:
-            logger.error(f"MD解析异常: {str(e)}")
-            error_context = {
-                "module_path": module_path,
-                "file_path": out_path,
-                "error": str(e),
-                "file_content": open(out_path, "r", encoding="utf-8").read() if os.path.exists(out_path) else None,
-                "traceback": traceback.format_exc()
-            }
-            raise RuntimeError(f"MD解析异常: {str(e)}, 文件路径: {out_path}, 文件内容: {error_context['file_content']}, 堆栈跟踪: {error_context['traceback']}") from e
+            raise RuntimeError(f"DXL execution exception: {str(e)}, command: {cmd}, temp directory: {temp_dir}") from e
+        finally:
+            # Clean up temporary DXL script file
+            os.unlink(dxl_path)
+    # Check if output.md file exists and is not empty
+    # Raise exception if file does not exist or is empty
+    if not os.path.isfile(out_path):
+        logging.error(f"File does not exist: {out_path}")
+        raise FileNotFoundError(f"File does not exist: {out_path}")
+    elif os.path.getsize(out_path) == 0:
+        logging.error(f"File is empty: {out_path}")
+        raise RuntimeError(f"File is empty: {out_path}")
+        # Open and read output.md file content
+    
+    with open(out_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    # Remove all blank lines
+    cleaned_content = "\n".join([line for line in content.splitlines() if any(c not in " \t\r" for c in line)])
+    # Write back to original file
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(cleaned_content)
+
+    # Parse Markdown file, convert to structured Testcase list
+    # Parse Markdown content by testcase group, extract fields
+    # Initialize testcase list
+    testcases: List[Testcase] = []
+    try:
+        with open(out_path, "r", encoding="utf-8") as f:
+            content2 = f.read()
+        # 按分隔符分割，得到多个测试用例块
+        test_case_blocks = content2.strip().split("++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        for block in test_case_blocks:
+            lines = [line for line in block.strip().split("\n") if line.strip() and line.strip() != "__DXL_SUCCESS__"]
+            if not lines:
+                continue
+            testcase_data = {}
+            for line in lines:
+                if line.startswith("## Testcase: "):
+                    testcase_data["ID"] = line.replace("## Testcase: ", "").strip()
+                elif line.startswith("- **URL**: "):
+                    testcase_data["TcURL"] = line.replace("- **URL**: ", "").strip()
+                elif line.startswith("- **Status**:"):
+                    testcase_data["Object_Status"] = line.replace("- **Status**: ", "").strip()
+                elif line.startswith("- **Description**:"):
+                    testcase_data["Test_Description"] = line.replace("- **Description**: ", "").strip()
+                elif line.startswith("- **Steps**:"):
+                    testcase_data["Test_Steps"] = ""
+                elif "Test_Steps" in testcase_data and not line.startswith("- **Expected Results**:"):
+                    # 收集步骤内容直到遇到 Expected Results
+                    testcase_data["Test_Steps"] += (line.strip() + "\n")
+                elif line.startswith("- **Expected Results**:"):
+                    testcase_data["Expected_Results"] = ""
+                elif "Expected_Results" in testcase_data:
+                    # 收集期望结果内容直到遇到下一个字段或结束
+                    testcase_data["Expected_Results"] += (line.strip() + "\n")
+            # 清理步骤和期望结果的多余换行
+            if "Test_Steps" in testcase_data:
+                testcase_data["Test_Steps"] = testcase_data["Test_Steps"].strip()
+            if "Expected_Results" in testcase_data:
+                testcase_data["Expected_Results"] = testcase_data["Expected_Results"].strip()
+            # 固定 Object_Type
+            testcase_data["Object_Type"] = "Testcase"
+            # 检查所有字段
+            if all(key in testcase_data for key in ["ID", "TcURL", "Test_Description", "Test_Steps", "Expected_Results"]):
+                testcases.append({
+                    "ID": testcase_data["ID"],
+                    "Object_Type": "Testcase",
+                    "Object_Status": testcase_data.get("Object_Status", "Released"),
+                    "TcURL": testcase_data["TcURL"],
+                    "Test_Description": testcase_data["Test_Description"],
+                    "Test_Steps": testcase_data["Test_Steps"],
+                    "Expected_Results": testcase_data["Expected_Results"]
+                })
+    except Exception as e:
+        logger.error(f"MD parsing exception: {str(e)}")
+        error_context = {
+            "module_path": module_path,
+            "file_path": out_path,
+            "error": str(e),
+            "file_content": open(out_path, "r", encoding="utf-8").read() if os.path.exists(out_path) else None,
+            "traceback": traceback.format_exc()
+        }
+        raise RuntimeError(f"MD parsing exception: {str(e)}, file path: {out_path}, file content: {error_context['file_content']}, traceback: {error_context['traceback']}") from e
     return testcases
 
 @mcp.resource("config://version")
 def get_version():
-    return "1.0.1"
-# MCP 服务器入口，支持命令行/Inspector/Claude Desktop 启动
+    return "1.0.2"
+
+
 if __name__ == "__main__":
     mcp.run(transport='stdio')
