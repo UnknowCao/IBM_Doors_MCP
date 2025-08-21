@@ -1,3 +1,38 @@
-*
+# Virtual environment files
+bin/
+include/
+lib/
+lib64
+pyvenv.cfg
+pip-selfcheck.json
+*.py[cod]
+__pycache__/
+
+# Environment variables
 .env
+.env.local
+.env.*.local
+
+# Log files
+*.log
 mylog.txt
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Default catch-all
+*
