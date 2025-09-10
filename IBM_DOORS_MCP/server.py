@@ -10,6 +10,7 @@ from typing_extensions import TypedDict   # Structured data types
 from dotenv import load_dotenv            # Load environment variables
 load_dotenv()  # Load DOORS authentication info from .env file
 import os
+import psutil
 
 import logging                # Logging
 logging.basicConfig(
@@ -147,7 +148,7 @@ mcp = FastMCP(name="IBM_DOORS_MCP")
 #     requirements: List[Requirement] = []
 #     try:
 #         # 解析 CSV 文件，转换为结构化 Requirement 列表
-#         with open(out_path, "r", encoding="utf-8") as f:
+#         with open(out_path, "r") as f:
 #             reader = csv.reader(f)
 #             for row in reader:
 #                 # 跳过错误行或格式不完整行
@@ -178,7 +179,7 @@ def get_testcases(module_path: str, output_path: str) -> List[Testcase]:
 
     Args:
         module_path (str): Full path to the DOORS testcase module, e.g. "/Project/TestcaseModule"
-        output_path (str): Directory path to save the output file, e.g. "C:\\output_path", automatically generates output.md
+        output_path (str): Directory path to save the output file, e.g. "C:\\output_path", automatically generates output.md, usually the root directory of the project.
 
     Environment variables required:
         DOORS_USERNAME, DOORS_PASSWORD, DOORS_SERVERADDR (authentication info), optional DOORS_PATH (DOORS client path, default "C:\\Program Files\\IBM\\Rational\\DOORS\\9.7\\bin\\doors.exe")
@@ -267,7 +268,7 @@ close(m)
     # Create temporary directory to manage related files
     with tempfile.TemporaryDirectory() as temp_dir:
         dxl_path = os.path.join(temp_dir, "script.dxl")        # Create DXL script file in temp directory
-        with open(dxl_path, "w", encoding="utf-8") as dxl_file:
+        with open(dxl_path, "w") as dxl_file:
             dxl_file.write(dxl_script)
         if os.path.exists(dxl_path):
             logging.info(f"script.dxl  generated, path: {dxl_path}") 
@@ -317,18 +318,6 @@ close(m)
                  cwd=r"C:\\Program Files\\IBM\\Rational\\DOORS\\9.7",
                  shell=True
             )
-            doors_pid = proc.pid
-
-            # process = subprocess.Popen([
-            #     r'C:\Program Files\IBM\Rational\DOORS\9.7\bin\doors.exe',
-            #     '-nosplash',  # 禁用启动画面
-            #     '-console',   # 启用控制台输出
-            #     '-debug'      # 启用调试模式
-            # ], env=env, cwd=r'C:\Program Files\IBM\Rational\DOORS\9.7\bin')
-            # process = subprocess.Popen([
-            #     'cmd', '/c', 'doors.exe'
-            # ], cwd=r'C:\Program Files\IBM\Rational\DOORS\9.7\bin'
-            # )
 
             logger.info(f"Executing DOORS command: {cmd}")
             start = time.time()
@@ -337,7 +326,7 @@ close(m)
             while time.time() - start < max_wait:
                 # Check if file is generated
                 if os.path.isfile(out_path):
-                    with open(out_path, "r", encoding="utf-8") as f:
+                    with open(out_path, "r") as f:
                         content = f.read()
                     # Check if file contains DXL success marker
                     if marker in content:
@@ -351,7 +340,19 @@ close(m)
                 raise TimeoutError(error_msg)
             else: # Marker detected, wait for DOORS process to exit normally
                 logger.info(f"DOORS DXL process ended, output.md marker detected")
-            subprocess.run(f"taskkill /F /PID {doors_pid}", shell=True)
+            # Find and kill all doors.exe processes
+            try:
+                killed_pids = []
+                for proc in psutil.process_iter(['pid', 'name']):
+                    if proc.info['name'] and proc.info['name'].lower() == "doors.exe":
+                        pid = proc.info['pid']
+                        subprocess.run(f"taskkill /F /PID {pid}", shell=True)
+                        killed_pids.append(pid)
+                logger.info(f"Killed doors.exe PIDs: {killed_pids}")
+            except Exception as e:
+                logger.error(f"Failed to kill doors.exe processes: {str(e)}")
+            # 原始方式保留（可选）
+            # subprocess.run(f"taskkill /F /PID {doors_pid}", shell=True)
         except Exception as e:
             # DXL execution exception handling, log context and raise detailed exception
             logger.error(f"DXL execution exception: {str(e)}")
@@ -377,12 +378,12 @@ close(m)
         raise RuntimeError(f"File is empty: {out_path}")
         # Open and read output.md file content
     
-    with open(out_path, "r", encoding="utf-8") as f:
+    with open(out_path, "r") as f:
             content = f.read()
     # Remove all blank lines
     cleaned_content = "\n".join([line for line in content.splitlines() if any(c not in " \t\r" for c in line)])
     # Write back to original file
-    with open(out_path, "w", encoding="utf-8") as f:
+    with open(out_path, "w") as f:
         f.write(cleaned_content)
 
     # Parse Markdown file, convert to structured Testcase list
@@ -390,7 +391,7 @@ close(m)
     # Initialize testcase list
     testcases: List[Testcase] = []
     try:
-        with open(out_path, "r", encoding="utf-8") as f:
+        with open(out_path, "r") as f:
             content2 = f.read()
         # 按分隔符分割，得到多个测试用例块
         test_case_blocks = content2.strip().split("++++++++++++++++++++++++++++++++++++++++++++++++++++++")
@@ -442,7 +443,7 @@ close(m)
             "module_path": module_path,
             "file_path": out_path,
             "error": str(e),
-            "file_content": open(out_path, "r", encoding="utf-8").read() if os.path.exists(out_path) else None,
+            "file_content": open(out_path, "r").read() if os.path.exists(out_path) else None,
             "traceback": traceback.format_exc()
         }
         raise RuntimeError(f"MD parsing exception: {str(e)}, file path: {out_path}, file content: {error_context['file_content']}, traceback: {error_context['traceback']}") from e
@@ -450,8 +451,7 @@ close(m)
 
 @mcp.resource("config://version")
 def get_version():
-    return "1.0.2"
-
+    return "1.0.3"
 
 if __name__ == "__main__":
     mcp.run(transport='stdio')
